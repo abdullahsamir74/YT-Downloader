@@ -1,0 +1,8 @@
+[project]
+name = "yt-downloader"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "yt-dlp>=2026.3.3",
+]
