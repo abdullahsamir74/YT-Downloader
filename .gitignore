@@ -13,11 +13,23 @@ env/
 
 # IDE
 .idea/
+.vscode/
 
-# Project specific
+# Testing & Cache
+.pytest_cache/
+
+# Project specific & Downloaded Media
 downloads/
+*.mp4
+*.m4a
+*.mp3
+*.flac
+*.webm
+*.mkv
+*.srt
+*.vtt
 
-# Package management
+# Package management & Builds
 *.egg-info/
 dist/
 build/

@@ -1,100 +1,93 @@
 # YouTube Downloader
 
-A Python-based YouTube video and playlist downloader with quality selection, audio extraction, and automatic English subtitle downloading.
+A fast, production-grade console application for downloading YouTube videos, playlists, and audio with a modern terminal interface.
+
+---
 
 ## Features
 
-- Download single videos or entire playlists
-- Multiple quality options (480p to Best Available)
-- Audio-only download (MP3 format)
-- Automatic English subtitle download
-- Auto-embed subtitles into videos (main_Subtitles.py)
-- Playlist videos numbered for organization
-- Anti-blocking measures with automatic retries
-- Progress tracking with speed and ETA
+- **Interactive Menu**: Smooth keyboard navigation with number key shortcuts (`1`–`6`) to quickly jump between options.
+- **Quality Options**: Download in 4K, 2K, 1080p, 720p, 480p, or Best Available quality.
+- **Audio Extraction**: Download high-quality audio tracks in MP3, M4A, or FLAC formats.
+- **Selective Playlist Downloader**: Interactive checklist table to pick specific videos from any playlist, auto-numbered (`01-`, `02-`).
+- **Auto Subtitle Embedding**: Automatically downloads and embeds English subtitles directly into `.mp4` video files via FFmpeg.
+- **Batch Subtitle Embedder**: Easily scan local folders to pair `.mp4` videos with `.srt` subtitles and embed them in one click.
+- **Live Progress Dashboard**: Real-time progress bars showing download speed, ETA countdown, and status.
+- **Direct CLI Mode**: Pass command-line flags to run direct downloads without menus.
 
-## Installation
+---
 
-### 1. Install Python Dependencies
+## Quick Start
+
+### 1. Installation
+
+Dependencies and project metadata are managed via `pyproject.toml`.
 
 ```bash
-pip install -r requirements.txt
+# Activate virtual environment
+source .venv/bin/activate
+
+# Install dependencies using pyproject.toml
+pip install -e .
+# Or with uv:
+uv pip install -e .
 ```
 
-### 2. Install FFmpeg (Required for audio conversion and subtitle embedding)
+### 2. Run the App
 
-**Linux:**
-```bash
-sudo apt update
-sudo apt install ffmpeg
-```
-
-**macOS:**
-```bash
-brew install ffmpeg
-```
-
-**Windows:**
-Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html) and add to PATH.
-
-## Usage
-
-### Basic Version (main.py)
-Downloads videos with external subtitle files:
 ```bash
 python main.py
 ```
 
-### Enhanced Version (main_Subtitles.py)
-Downloads videos with embedded subtitles and playlist numbering:
+### 3. Prerequisites
+
+- **Python 3.12+**
+- **FFmpeg** (required for audio conversion & subtitle embedding):
+  - **Linux**: `sudo apt install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH.
+
+---
+
+## Usage Guide
+
+### 1. Interactive Mode (Default)
+
+Launch the interactive app:
 ```bash
-python main_Subtitles.py
+python main.py
+```
+Use the arrow keys or press number keys `1`–`6` to navigate options:
+1. **Download Video** – Single video download with quality & subtitle selection.
+2. **Download Playlist** – Download selected playlist items.
+3. **Download Audio** – Extract audio only (MP3 / M4A / FLAC).
+4. **Batch Embed Subtitles** – Embed local `.srt` files into `.mp4` videos.
+5. **View Downloads** – List downloaded files in `./downloads`.
+6. **Exit** – Close the app.
+
+---
+
+### 2. Command Line Mode
+
+Run direct downloads without entering interactive menus:
+
+```bash
+# Download a video in 1080p
+python main.py --url "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --quality 1080p
+
+# Download audio only (MP3)
+python main.py --url "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --audio-only --audio-format mp3
 ```
 
-### Menu Options
-
-1. **Download Single Video** - Download one video with quality selection
-2. **Download Playlist** - Download entire YouTube playlist
-3. **Download Audio Only (MP3)** - Extract audio in MP3 format
-4. **Exit** - Close the application
-
-### Quality Options
-
-- SD (480p)
-- HD (720p)
-- Full HD (1080p) - Default
-- 2K (1440p)
-- Best Available Quality
-
-## Files
-
-- `main.py` - Basic downloader with subtitle files saved separately
-- `main_Subtitles.py` - Enhanced version with auto-embed subtitles and playlist numbering
-- `requirements.txt` - Python dependencies
-- `downloads/` - Default download directory (created automatically)
-
-## Requirements
-
-- Python 3.7+
-- yt-dlp (installed via requirements.txt)
-- ffmpeg (must be installed separately)
-
-## Notes
-
-- English subtitles are downloaded automatically when available
-- Subtitles are embedded directly into videos (main_Subtitles.py only)
-- Playlist videos are numbered (01-, 02-, etc.) for easy organization
-- The downloader includes anti-blocking measures and automatic retries
-- Internet connection required for downloading
+---
 
 ## Troubleshooting
 
-**"ffmpeg not found" warning:**
-- Install ffmpeg using the instructions above
-- Verify installation: `ffmpeg -version`
+- **FFmpeg Not Found**: Ensure FFmpeg is installed and added to your system PATH (`ffmpeg -version`).
+- **Download Cancelled**: Press <kbd>Ctrl</kbd>+<kbd>C</kbd> at any prompt to return to the main menu or exit cleanly.
 
-**Download fails:**
-- Check your internet connection
-- Verify the YouTube URL is correct
-- Try a different quality option
-- The tool will automatically retry failed downloads
+---
+
+## License
+
+MIT License
