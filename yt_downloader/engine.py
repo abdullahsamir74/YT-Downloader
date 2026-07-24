@@ -66,17 +66,24 @@ class SubtitleEmbedder:
         temp_out = video_file.with_name(f"{video_file.stem}_temp{video_file.suffix}")
         cmd = [
             self.ffmpeg_path,
-            "-i", str(video_file),
-            "-i", str(subtitle_file),
-            "-c", "copy",
-            "-c:s", "mov_text",
-            "-metadata:s:s:0", "language=eng",
+            "-i",
+            str(video_file),
+            "-i",
+            str(subtitle_file),
+            "-c",
+            "copy",
+            "-c:s",
+            "mov_text",
+            "-metadata:s:s:0",
+            "language=eng",
             "-y",
             str(temp_out),
         ]
 
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
             if res.returncode == 0 and temp_out.exists():
                 video_file.unlink(missing_ok=True)
                 temp_out.rename(video_file)
@@ -98,7 +105,12 @@ class Downloader:
         self.sub_embedder = SubtitleEmbedder()
 
     def fetch_info(self, url: str) -> Optional[Union[VideoInfo, PlaylistInfo]]:
-        opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "skip_download": True}
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": "in_playlist",
+            "skip_download": True,
+        }
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -117,13 +129,19 @@ class Downloader:
                                     id=v_id,
                                     title=entry.get("title", f"Video {idx}"),
                                     duration_str=format_duration(dur),
-                                    url=f"https://www.youtube.com/watch?v={v_id}" if v_id else "",
+                                    url=(
+                                        f"https://www.youtube.com/watch?v={v_id}"
+                                        if v_id
+                                        else ""
+                                    ),
                                 )
                             )
                     return PlaylistInfo(
                         id=info.get("id", ""),
                         title=info.get("title", "Playlist"),
-                        uploader=info.get("uploader") or info.get("channel") or "Unknown",
+                        uploader=info.get("uploader")
+                        or info.get("channel")
+                        or "Unknown",
                         entries=entries,
                         url=url,
                     )
@@ -132,7 +150,9 @@ class Downloader:
                     return VideoInfo(
                         id=info.get("id", ""),
                         title=info.get("title", "Video"),
-                        uploader=info.get("uploader") or info.get("channel") or "Unknown",
+                        uploader=info.get("uploader")
+                        or info.get("channel")
+                        or "Unknown",
                         duration_str=format_duration(dur),
                         view_count=int(info.get("view_count") or 0),
                         url=url,
@@ -148,7 +168,10 @@ class Downloader:
         prefix: Optional[str] = None,
     ) -> bool:
         opts.output_dir.mkdir(parents=True, exist_ok=True)
-        outtmpl = str(opts.output_dir / (f"{prefix}-%(title)s.%(ext)s" if prefix else "%(title)s.%(ext)s"))
+        outtmpl = str(
+            opts.output_dir
+            / (f"{prefix}-%(title)s.%(ext)s" if prefix else "%(title)s.%(ext)s")
+        )
 
         format_map = {
             "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
@@ -191,13 +214,20 @@ class Downloader:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                if not opts.audio_only and opts.subtitles == "embed" and self.sub_embedder.is_available and info:
+                if (
+                    not opts.audio_only
+                    and opts.subtitles == "embed"
+                    and self.sub_embedder.is_available
+                    and info
+                ):
                     target_filename = ydl.prepare_filename(info)
                     target_path = Path(target_filename)
                     if not target_path.exists():
                         candidates = list(opts.output_dir.glob(f"*{prefix or ''}*.mp4"))
                         if candidates:
-                            candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                            candidates.sort(
+                                key=lambda x: x.stat().st_mtime, reverse=True
+                            )
                             target_path = candidates[0]
                     if target_path.exists():
                         self.sub_embedder.embed(target_path)
@@ -217,6 +247,12 @@ def scan_batch(folder: Path) -> List[BatchItem]:
         if "_temp" in f.stem or "_embedded" in f.stem:
             continue
         sub = embedder.find_subtitle(f)
-        items.append(BatchItem(video_file=f, subtitle_file=sub, status="ready" if sub else "missing_sub"))
+        items.append(
+            BatchItem(
+                video_file=f,
+                subtitle_file=sub,
+                status="ready" if sub else "missing_sub",
+            )
+        )
 
     return items

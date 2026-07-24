@@ -54,10 +54,13 @@ python main.py
 ### 1. Interactive Mode (Default)
 
 Launch the interactive app:
+
 ```bash
 python main.py
 ```
+
 Use the arrow keys or press number keys `1`–`6` to navigate options:
+
 1. **Download Video** – Single video download with quality & subtitle selection.
 2. **Download Playlist** – Download selected playlist items.
 3. **Download Audio** – Extract audio only (MP3 / M4A / FLAC).

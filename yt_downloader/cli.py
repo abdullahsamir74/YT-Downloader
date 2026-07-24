@@ -12,12 +12,45 @@ from yt_downloader.models import DownloadOpts
 
 def main():
     parser = argparse.ArgumentParser(description="YouTube Downloader Console App")
-    parser.add_argument("--url", "-u", type=str, help="YouTube video or playlist URL for direct download")
-    parser.add_argument("--quality", "-q", type=str, default="1080p", choices=["480p", "720p", "1080p", "1440p", "2160p", "best"], help="Target video quality")
-    parser.add_argument("--audio-only", "-a", action="store_true", help="Download audio only")
-    parser.add_argument("--audio-format", type=str, default="mp3", choices=["mp3", "m4a", "flac"], help="Audio format")
-    parser.add_argument("--subtitles", "-s", type=str, default="embed", choices=["embed", "separate", "none"], help="Subtitle handling mode")
-    parser.add_argument("--output-dir", "-o", type=str, default="downloads", help="Output directory path")
+    parser.add_argument(
+        "--url",
+        "-u",
+        type=str,
+        help="YouTube video or playlist URL for direct download",
+    )
+    parser.add_argument(
+        "--quality",
+        "-q",
+        type=str,
+        default="1080p",
+        choices=["480p", "720p", "1080p", "1440p", "2160p", "best"],
+        help="Target video quality",
+    )
+    parser.add_argument(
+        "--audio-only", "-a", action="store_true", help="Download audio only"
+    )
+    parser.add_argument(
+        "--audio-format",
+        type=str,
+        default="mp3",
+        choices=["mp3", "m4a", "flac"],
+        help="Audio format",
+    )
+    parser.add_argument(
+        "--subtitles",
+        "-s",
+        type=str,
+        default="embed",
+        choices=["embed", "separate", "none"],
+        help="Subtitle handling mode",
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=str,
+        default="downloads",
+        help="Output directory path",
+    )
 
     args = parser.parse_args()
 
