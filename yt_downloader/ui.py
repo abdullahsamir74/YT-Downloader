@@ -16,7 +16,6 @@ from rich.progress import (
     TextColumn,
     BarColumn,
     TaskProgressColumn,
-    DownloadColumn,
     TransferSpeedColumn,
     TimeRemainingColumn,
 )
@@ -226,28 +225,56 @@ class App:
             TextColumn("[bold cyan]{task.description}"),
             BarColumn(bar_width=35, complete_style="cyan"),
             TaskProgressColumn(),
-            DownloadColumn(),
+            TextColumn("{task.fields[size_text]}"),
             TransferSpeedColumn(),
             TimeRemainingColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task(f"{title[:30]}...", total=100)
+            task = progress.add_task(
+                f"{title[:30]}...", total=None, size_text=""
+            )
 
             def hook(d):
                 st = d.get("status")
                 if st == "downloading":
                     tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
                     cur = d.get("downloaded_bytes") or 0
-                    pct = (cur / tot * 100) if tot > 0 else 0
                     fn = Path(d.get("filename", "")).name or title
-                    progress.update(task, completed=pct, description=f"{fn[:30]}")
+                    size_str = (
+                        f"{format_bytes(cur)} / {format_bytes(tot)}"
+                        if tot > 0
+                        else format_bytes(cur)
+                    )
+                    if tot > 0:
+                        progress.update(
+                            task,
+                            completed=cur,
+                            total=tot,
+                            description=f"{fn[:30]}",
+                            size_text=size_str,
+                        )
+                    else:
+                        progress.update(
+                            task,
+                            description=f"{fn[:30]}",
+                            size_text=size_str,
+                        )
                 elif st == "finished":
-                    progress.update(task, completed=95, description="Processing...")
+                    tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                    size_str = format_bytes(tot) if tot > 0 else ""
+                    progress.update(
+                        task,
+                        completed=tot if tot > 0 else 95,
+                        total=tot if tot > 0 else 100,
+                        description="Processing...",
+                        size_text=size_str,
+                    )
 
             ok = self.downloader.download(url, opts, progress_cb=hook, prefix=prefix)
             if ok:
+                current_total = progress._tasks[task].total or 100
                 progress.update(
-                    task, completed=100, description="[bold green]✓ Completed"
+                    task, completed=current_total, description="[bold green]✓ Completed"
                 )
                 console.print(
                     f"[bold green]✓ Saved to {opts.output_dir}[/bold green]\n"
