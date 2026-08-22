@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yt-downloader"
-version = "1.0.0"
-description = "YouTube Downloader Console App"
+version = "2.0.0"
+description = "Modern YouTube Downloader with Clean Architecture & Interactive Console Dashboard"
 requires-python = ">=3.12"
 dependencies = [
-    "yt-dlp>=2025.12.8",
+    "yt-dlp>=2024.0.0",
     "rich>=13.0.0",
-    "InquirerPy>=0.3.4",
 ]
 
 [project.scripts]
 yt-dl = "yt_downloader.cli:main"
+yt-downloader = "yt_downloader.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["yt_downloader*"]

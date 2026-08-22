@@ -1,6 +1,6 @@
 """
-Main entry point for YouTube Downloader.
-Run with: python main.py
+YT-Downloader Pro Main Entrypoint.
+Run `python main.py` for interactive modern UI or `python main.py --help` for CLI options.
 """
 
 from yt_downloader.cli import main
