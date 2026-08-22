@@ -352,7 +352,8 @@ class InteractiveConsoleApp:
                 table.add_column("Duration", style="yellow")
 
                 for entry in info.entries[:25]:
-                    table.add_row(f"{entry.index:02d}", entry.title[:55], entry.duration_str)
+                    title_display = (entry.title or f"Video {entry.index}")[:55]
+                    table.add_row(f"{entry.index:02d}", title_display, entry.duration_str)
 
                 if len(info.entries) > 25:
                     table.add_row("...", f"... and {len(info.entries) - 25} more videos", "")
@@ -417,8 +418,9 @@ class InteractiveConsoleApp:
                         output_dir=Path(self.config_service.config.default_output_dir),
                         custom_prefix=prefix,
                     )
-                    console.print(f"\n[bold cyan][{i}/{len(selected_entries)}][/bold cyan] {item.title}")
-                    self._execute_live_download(item.url, cfg, item.title)
+                    v_title = item.title or f"Video {i}"
+                    console.print(f"\n[bold cyan][{i}/{len(selected_entries)}][/bold cyan] {v_title}")
+                    self._execute_live_download(item.url, cfg, v_title)
 
                 console.print("\n[bold green]✓ Playlist Download Finished![/bold green]")
                 self._wait_enter()

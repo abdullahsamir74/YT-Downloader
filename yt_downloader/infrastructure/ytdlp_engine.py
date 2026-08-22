@@ -140,29 +140,36 @@ class YtDlpEngine:
                 for idx, entry in enumerate(info.get("entries") or [], 1):
                     if not entry:
                         continue
-                    v_id = entry.get("id", "")
+                    v_id = str(entry.get("id") or "")
                     dur = int(entry.get("duration") or 0)
                     v_url = entry.get("url") or (f"https://www.youtube.com/watch?v={v_id}" if v_id else "")
+                    v_title = str(entry.get("title") or f"Video {idx}")
+                    v_uploader = str(entry.get("uploader") or entry.get("channel") or "Unknown Channel")
+                    v_thumb = str(entry.get("thumbnail") or "")
                     entries.append(
                         PlaylistItem(
                             index=idx,
                             id=v_id,
-                            title=entry.get("title", f"Video {idx}"),
+                            title=v_title,
                             duration_str=format_seconds(dur),
                             duration=dur,
                             url=v_url,
-                            uploader=entry.get("uploader") or entry.get("channel") or "",
-                            thumbnail_url=entry.get("thumbnail") or "",
+                            uploader=v_uploader,
+                            thumbnail_url=v_thumb,
                             selected=True,
                         )
                     )
 
+                p_title = str(info.get("title") or "Playlist")
+                p_uploader = str(info.get("uploader") or info.get("channel") or "Unknown Channel")
+                p_thumb = str(info.get("thumbnail") or (entries[0].thumbnail_url if entries else ""))
+
                 return PlaylistInfo(
-                    id=str(info.get("id", "")),
-                    title=str(info.get("title", "Playlist")),
-                    uploader=str(info.get("uploader") or info.get("channel") or "Unknown Channel"),
+                    id=str(info.get("id") or ""),
+                    title=p_title,
+                    uploader=p_uploader,
                     url=url,
-                    thumbnail_url=str(info.get("thumbnail") or (entries[0].thumbnail_url if entries else "")),
+                    thumbnail_url=p_thumb,
                     entries=entries,
                     total_count=len(entries),
                 )
