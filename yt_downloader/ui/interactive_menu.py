@@ -242,6 +242,23 @@ class InteractiveConsoleApp:
 
         console.print(Panel(summary_table, title="[bold cyan]🚀 Download Summary & Plan[/bold cyan]", border_style="cyan", padding=(0, 2)))
 
+    def _print_playlist_summary_card(
+        self, playlist_title: str, total_items: int, quality: QualityPreset, subtitles: SubtitleMode
+    ):
+        """Displays a summary card of chosen playlist options before download begins."""
+        summary_table = Table.grid(padding=(0, 2))
+        summary_table.add_column(style="cyan bold", justify="right")
+        summary_table.add_column(style="bold white")
+
+        summary_table.add_row("Playlist:", playlist_title)
+        summary_table.add_row("Selected Videos:", f"[bold green]{total_items} video(s) selected[/bold green]")
+        summary_table.add_row("Target Quality:", f"[bold green]{quality.value} ({quality.label})[/bold green]")
+        summary_table.add_row("Subtitles:", f"[yellow]{subtitles.label}[/yellow]")
+        summary_table.add_row("Save Destination:", str(Path(self.config_service.config.default_output_dir).resolve()))
+        summary_table.add_row("Post-Processing:", "Embed Cover Art • Embed ID3 Metadata & Chapters")
+
+        console.print(Panel(summary_table, title="[bold cyan]🚀 Playlist Download Summary & Plan[/bold cyan]", border_style="cyan", padding=(0, 2)))
+
     # ==========================================
     # 1. Single Video Stepwise Flow
     # ==========================================
@@ -322,6 +339,7 @@ class InteractiveConsoleApp:
         scope = "all"
         selected_entries: List[Any] = []
         quality: Optional[QualityPreset] = None
+        subtitles: Optional[SubtitleMode] = None
         step = 1
 
         while step > 0:
@@ -398,24 +416,52 @@ class InteractiveConsoleApp:
                 step = 4
 
             elif step == 4:
+                quality_step_title = (
+                    f"Step 4: Select Target Quality for {len(selected_entries)} Selected Video(s)"
+                    if scope == "range"
+                    else f"Step 3: Select Target Quality for {len(selected_entries)} Selected Video(s)"
+                )
+                back_label = "Back to Range selection" if scope == "range" else "Back to Scope selection"
                 quality = prompt_numbered_choice(
-                    f"Step 3: Select Target Quality for {len(selected_entries)} Selected Video(s)",
+                    quality_step_title,
                     self._get_quality_options(),
                     default_idx=self._get_quality_default_idx(),
-                    back_label="Back to Scope selection",
+                    back_label=back_label,
                 )
                 if quality is None:
-                    step = 2
+                    step = 3 if scope == "range" else 2
                     continue
                 step = 5
 
             elif step == 5:
+                subtitles_step_title = (
+                    "Step 5: Select Subtitles Strategy"
+                    if scope == "range"
+                    else "Step 4: Select Subtitles Strategy"
+                )
+                subtitles = prompt_numbered_choice(
+                    subtitles_step_title,
+                    self._get_subtitle_options(),
+                    default_idx=self._get_subtitle_default_idx(),
+                    back_label="Back to Quality selection",
+                )
+                if subtitles is None:
+                    step = 4
+                    continue
+                step = 6
+
+            elif step == 6:
+                self._print_playlist_summary_card(info.title, len(selected_entries), quality, subtitles)
                 pad = len(str(len(selected_entries)))
                 for i, item in enumerate(selected_entries, 1):
                     prefix = str(i).zfill(pad)
                     cfg = DownloadConfig(
                         quality=quality,
+                        audio_only=False,
+                        subtitles=subtitles,
                         output_dir=Path(self.config_service.config.default_output_dir),
+                        embed_thumbnail=True,
+                        embed_metadata=True,
                         custom_prefix=prefix,
                     )
                     v_title = item.title or f"Video {i}"

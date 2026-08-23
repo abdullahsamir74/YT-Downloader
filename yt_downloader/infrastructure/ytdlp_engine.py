@@ -142,7 +142,20 @@ class YtDlpEngine:
                         continue
                     v_id = str(entry.get("id") or "")
                     dur = int(entry.get("duration") or 0)
-                    v_url = entry.get("url") or (f"https://www.youtube.com/watch?v={v_id}" if v_id else "")
+                    raw_url = str(entry.get("url") or "").strip()
+                    if raw_url:
+                        if raw_url.startswith("http://") or raw_url.startswith("https://"):
+                            v_url = raw_url
+                        elif raw_url.startswith("/"):
+                            v_url = f"https://www.youtube.com{raw_url}"
+                        elif "watch" in raw_url:
+                            v_url = f"https://www.youtube.com/{raw_url.lstrip('/')}"
+                        else:
+                            v_url = f"https://www.youtube.com/watch?v={raw_url}"
+                    elif v_id:
+                        v_url = f"https://www.youtube.com/watch?v={v_id}"
+                    else:
+                        v_url = ""
                     v_title = str(entry.get("title") or f"Video {idx}")
                     v_uploader = str(entry.get("uploader") or entry.get("channel") or "Unknown Channel")
                     v_thumb = str(entry.get("thumbnail") or "")
@@ -301,15 +314,25 @@ class YtDlpEngine:
                     if audio_target.exists():
                         downloaded_file = audio_target
 
-                # If merged format is mp4
+                # If merged format is mp4 or other video containers
                 if not cfg.audio_only:
-                    mp4_target = downloaded_file.with_suffix(".mp4")
-                    if mp4_target.exists():
-                        downloaded_file = mp4_target
+                    for cand_ext in [".mp4", ".mkv", ".webm", ".mov"]:
+                        cand_target = downloaded_file.with_suffix(cand_ext)
+                        if cand_target.exists():
+                            downloaded_file = cand_target
+                            break
 
                 # If the exact path does not exist, find closest matching file in output dir
                 if not downloaded_file.exists():
-                    matches = list(cfg.output_dir.glob(f"*{prefix_str}*"))
+                    valid_exts = (
+                        {f".{cfg.audio_format.value}", ".mp3", ".m4a", ".flac", ".opus", ".wav", ".aac", ".ogg"}
+                        if cfg.audio_only
+                        else {".mp4", ".mkv", ".webm", ".mov", ".avi", ".ts", ".flv"}
+                    )
+                    matches = [
+                        p for p in cfg.output_dir.glob(f"*{prefix_str}*")
+                        if p.is_file() and p.suffix.lower() in valid_exts
+                    ]
                     if matches:
                         matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                         downloaded_file = matches[0]
