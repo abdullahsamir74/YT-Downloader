@@ -2,16 +2,16 @@
 Strongly typed domain models for YT-Downloader.
 """
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional, Dict, Any
 import time
 import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from yt_downloader.core.enums import (
-    QualityPreset,
-    AudioFormat,
     AudioBitrate,
+    AudioFormat,
+    QualityPreset,
     SubtitleMode,
     TaskStatus,
     ThemeName,
@@ -44,6 +44,7 @@ def format_bytes(num_bytes: Optional[float | int]) -> str:
 @dataclass
 class StreamInfo:
     """Metadata about a single audio or video stream."""
+
     format_id: str
     resolution: str
     ext: str
@@ -58,6 +59,7 @@ class StreamInfo:
 @dataclass
 class MediaItem:
     """Comprehensive metadata for a video, short, or audio stream."""
+
     id: str
     title: str
     uploader: str
@@ -77,6 +79,7 @@ class MediaItem:
 @dataclass
 class PlaylistItem:
     """An individual item within a playlist."""
+
     index: int
     id: str
     title: str
@@ -91,6 +94,7 @@ class PlaylistItem:
 @dataclass
 class PlaylistInfo:
     """Metadata and item listing for a YouTube playlist."""
+
     id: str
     title: str
     uploader: str
@@ -103,6 +107,7 @@ class PlaylistInfo:
 @dataclass
 class DownloadConfig:
     """Configuration options for a download task."""
+
     quality: QualityPreset = QualityPreset.FHD_1080P
     audio_only: bool = False
     audio_format: AudioFormat = AudioFormat.MP3
@@ -117,10 +122,19 @@ class DownloadConfig:
     concurrent_fragments: int = 4
     rate_limit_bytes: Optional[int] = None
 
+    def __post_init__(self):
+        # Accept a plain string from API/CLI callers while keeping the
+        # strongly-typed Path contract internally.
+        if not isinstance(self.output_dir, Path):
+            self.output_dir = Path(self.output_dir)
+        if self.subtitle_langs is None:
+            self.subtitle_langs = ["en"]
+
 
 @dataclass
 class TaskProgress:
     """Real-time progress telemetry for a download task."""
+
     task_id: str
     status: TaskStatus = TaskStatus.QUEUED
     downloaded_bytes: int = 0
@@ -137,6 +151,7 @@ class TaskProgress:
 @dataclass
 class DownloadTask:
     """Entity representing a discrete download job."""
+
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     url: str = ""
     title: str = "Untitled"
@@ -155,6 +170,7 @@ class DownloadTask:
 @dataclass
 class BatchItem:
     """Pairing of a local video file and its associated subtitle file."""
+
     video_file: Path
     subtitle_file: Optional[Path]
     status: str = "ready"  # ready, missing_sub, done, error
@@ -165,6 +181,7 @@ class BatchItem:
 @dataclass
 class HistoryRecord:
     """Persistent history record of a completed media download."""
+
     id: str
     url: str
     title: str
@@ -181,6 +198,7 @@ class HistoryRecord:
 @dataclass
 class AppConfig:
     """Persistent application settings and user preferences."""
+
     default_output_dir: str = "downloads"
     default_quality: QualityPreset = QualityPreset.FHD_1080P
     default_audio_format: AudioFormat = AudioFormat.MP3
@@ -206,14 +224,57 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
+        """Build configuration from persisted data, tolerating corrupt fields.
+
+        Settings files can be edited by hand or written by older versions.  A
+        single invalid value must not discard every other valid preference.
+        """
+        if not isinstance(data, dict):
+            return cls()
+
+        def enum_value(enum_type, key: str, default):
+            raw = data.get(key, default.value)
+            try:
+                return enum_type(raw)
+            except (TypeError, ValueError):
+                return default
+
+        def bool_value(key: str, default: bool) -> bool:
+            raw = data.get(key, default)
+            if isinstance(raw, bool):
+                return raw
+            if isinstance(raw, str):
+                return raw.strip().lower() in {"1", "true", "yes", "on"}
+            if raw is None:
+                return default
+            return bool(raw)
+
+        try:
+            max_workers = int(data.get("max_concurrent_downloads", 3))
+        except (TypeError, ValueError):
+            max_workers = 3
+        max_workers = max(1, min(10, max_workers))
+
+        output_dir = data.get("default_output_dir", "downloads")
+        if not isinstance(output_dir, str) or not output_dir.strip():
+            output_dir = "downloads"
+
         return cls(
-            default_output_dir=data.get("default_output_dir", "downloads"),
-            default_quality=QualityPreset(data.get("default_quality", "1080p")),
-            default_audio_format=AudioFormat(data.get("default_audio_format", "mp3")),
-            default_audio_bitrate=AudioBitrate(data.get("default_audio_bitrate", "192")),
-            default_subtitle_mode=SubtitleMode(data.get("default_subtitle_mode", "embed")),
-            max_concurrent_downloads=int(data.get("max_concurrent_downloads", 3)),
-            theme=ThemeName(data.get("theme", "cyberpunk")),
-            embed_metadata_default=bool(data.get("embed_metadata_default", True)),
-            embed_thumbnail_default=bool(data.get("embed_thumbnail_default", True)),
+            default_output_dir=output_dir,
+            default_quality=enum_value(
+                QualityPreset, "default_quality", QualityPreset.FHD_1080P
+            ),
+            default_audio_format=enum_value(
+                AudioFormat, "default_audio_format", AudioFormat.MP3
+            ),
+            default_audio_bitrate=enum_value(
+                AudioBitrate, "default_audio_bitrate", AudioBitrate.B192
+            ),
+            default_subtitle_mode=enum_value(
+                SubtitleMode, "default_subtitle_mode", SubtitleMode.EMBED
+            ),
+            max_concurrent_downloads=max_workers,
+            theme=enum_value(ThemeName, "theme", ThemeName.CYBERPUNK),
+            embed_metadata_default=bool_value("embed_metadata_default", True),
+            embed_thumbnail_default=bool_value("embed_thumbnail_default", True),
         )

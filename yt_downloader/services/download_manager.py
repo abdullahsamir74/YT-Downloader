@@ -3,15 +3,14 @@ Download Manager supervising concurrent worker threads, task queues, and telemet
 """
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future
-from typing import Dict, List, Optional, Callable
-from pathlib import Path
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Callable, Dict, List, Optional
 
 from yt_downloader.core.enums import TaskStatus
-from yt_downloader.core.models import DownloadTask, TaskProgress
+from yt_downloader.core.models import AppConfig, DownloadTask, TaskProgress
 from yt_downloader.infrastructure.ytdlp_engine import YtDlpEngine
-from yt_downloader.services.history_service import HistoryService
 from yt_downloader.services.config_service import ConfigService
+from yt_downloader.services.history_service import HistoryService
 
 
 class DownloadManager:
@@ -28,7 +27,10 @@ class DownloadManager:
         self.config_service = config_service or ConfigService()
 
         max_workers = self.config_service.config.max_concurrent_downloads
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="dl-worker")
+        self._max_workers = max(1, min(10, max_workers))
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._max_workers, thread_name_prefix="dl-worker"
+        )
 
         self._tasks: Dict[str, DownloadTask] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
@@ -36,10 +38,26 @@ class DownloadManager:
         self._lock = threading.RLock()
         self._listeners: List[Callable[[DownloadTask], None]] = []
 
+        # Keep the worker pool in sync when settings are changed at runtime.
+        subscribe = getattr(self.config_service, "subscribe", None)
+        if callable(subscribe):
+            subscribe(self._on_config_changed)
+
+    def _on_config_changed(self, config: AppConfig) -> None:
+        desired = max(1, min(10, config.max_concurrent_downloads))
+        if desired != self._max_workers:
+            self.set_max_concurrency(desired)
+
     def set_max_concurrency(self, max_workers: int) -> None:
+        max_workers = max(1, min(10, max_workers))
         with self._lock:
+            if max_workers == self._max_workers:
+                return
             self._executor.shutdown(wait=False)
-            self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="dl-worker")
+            self._max_workers = max_workers
+            self._executor = ThreadPoolExecutor(
+                max_workers=max_workers, thread_name_prefix="dl-worker"
+            )
 
     def subscribe(self, callback: Callable[[DownloadTask], None]) -> None:
         with self._lock:
@@ -98,14 +116,27 @@ class DownloadManager:
 
     def get_active_tasks(self) -> List[DownloadTask]:
         with self._lock:
-            return [t for t in self._tasks.values() if t.status.is_active or t.status == TaskStatus.QUEUED]
+            return [
+                t
+                for t in self._tasks.values()
+                if t.status.is_active or t.status == TaskStatus.QUEUED
+            ]
 
-    def _worker_execute(self, task: DownloadTask, cancel_event: threading.Event) -> None:
+    def _worker_execute(
+        self, task: DownloadTask, cancel_event: threading.Event
+    ) -> None:
         def on_progress(p: TaskProgress):
             self._notify(task)
 
         try:
+            if cancel_event.is_set() or task.status == TaskStatus.CANCELLED:
+                task.status = TaskStatus.CANCELLED
+                task.progress.status = TaskStatus.CANCELLED
+                task.progress.message = "Cancelled by user"
+                return
+
             task.status = TaskStatus.DOWNLOADING
+            task.progress.status = TaskStatus.DOWNLOADING
             self._notify(task)
 
             output_file = self.engine.download_stream(
@@ -114,6 +145,12 @@ class DownloadManager:
                 cancel_event=cancel_event,
             )
 
+            if cancel_event.is_set():
+                task.status = TaskStatus.CANCELLED
+                task.progress.status = TaskStatus.CANCELLED
+                task.progress.message = "Cancelled by user"
+                return
+
             if output_file and output_file.exists():
                 media_type = "audio" if task.config.audio_only else "video"
                 quality_str = (
@@ -121,19 +158,41 @@ class DownloadManager:
                     if task.config.audio_only
                     else task.config.quality.value
                 )
-                self.history_service.record_completed_download(
-                    task_id=task.id,
-                    url=task.url,
-                    title=task.title,
-                    uploader="YouTube",
-                    duration_str=task.progress.eta_str,
-                    file_path=output_file,
-                    media_type=media_type,
-                    quality_or_format=quality_str,
-                )
+                try:
+                    self.history_service.record_completed_download(
+                        task_id=task.id,
+                        url=task.url,
+                        title=task.title,
+                        uploader="YouTube",
+                        duration_str="--:--",
+                        file_path=output_file,
+                        media_type=media_type,
+                        quality_or_format=quality_str,
+                    )
+                except Exception as history_error:
+                    # The file is safely on disk; a history write failure must
+                    # not turn a successful download into a failed one.
+                    task.error_message = (
+                        f"Downloaded, but history could not be saved: "
+                        f"{history_error!s}"
+                    )
+                task.status = TaskStatus.COMPLETED
+                task.progress.status = TaskStatus.COMPLETED
+                task.progress.percent = 100.0
+                task.progress.message = "Completed"
+                task.output_file = output_file
+            else:
+                task.status = TaskStatus.FAILED
+                task.progress.status = TaskStatus.FAILED
+                task.progress.message = "Download finished but no output file was found"
+                task.error_message = task.progress.message
 
         except Exception as e:
-            if not cancel_event.is_set():
+            if cancel_event.is_set() or task.status == TaskStatus.CANCELLED:
+                task.status = TaskStatus.CANCELLED
+                task.progress.status = TaskStatus.CANCELLED
+                task.progress.message = "Cancelled by user"
+            else:
                 task.status = TaskStatus.FAILED
                 task.progress.status = TaskStatus.FAILED
                 task.progress.message = str(e)

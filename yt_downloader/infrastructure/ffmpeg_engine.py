@@ -2,12 +2,11 @@
 FFmpeg Infrastructure Engine for subtitle muxing, audio processing, and metadata tagging.
 """
 
+import re
 import shutil
 import subprocess
-import os
-import re
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
 
 from yt_downloader.core.exceptions import FFmpegNotFoundError, MuxingError
 from yt_downloader.core.models import BatchItem
@@ -24,17 +23,22 @@ class FFmpegEngine:
     def is_ffmpeg_available(self) -> bool:
         return self._ffmpeg_path is not None
 
+    def _require_ffmpeg(self) -> str:
+        if not self._ffmpeg_path:
+            raise FFmpegNotFoundError("FFmpeg is not installed or not in PATH")
+        return self._ffmpeg_path
+
     @property
     def ffmpeg_version(self) -> Optional[str]:
         if not self.is_ffmpeg_available:
             return None
         try:
             res = subprocess.run(
-                [self._ffmpeg_path, "-version"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                [self._require_ffmpeg(), "-version"],
+                capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
             match = re.search(r"ffmpeg version\s+([^\s]+)", res.stdout)
             return match.group(1) if match else "Installed"
@@ -49,7 +53,7 @@ class FFmpegEngine:
         stem = video_path.stem
         parent = video_path.parent
 
-        # Check precise suffixes first
+        # Check precise suffixes first.
         sub_extensions = [
             f"{stem}.en.srt",
             f"{stem}.eng.srt",
@@ -63,11 +67,25 @@ class FFmpegEngine:
             if candidate.exists() and candidate.is_file():
                 return candidate
 
-        # Fuzzy search for any subtitle matching stem
-        for ext in [".srt", ".vtt", ".ass"]:
-            for candidate in parent.glob(f"*{ext}"):
-                if stem.lower() in candidate.stem.lower():
-                    return candidate
+        # Case-insensitive exact or language-suffixed match (e.g.
+        # ``movie.en.srt`` for ``movie.mp4``).  Avoid substring matching so
+        # ``movie2.srt`` is not used for ``movie.mp4``.
+        stem_lower = stem.lower()
+        subtitle_exts = {".srt", ".vtt", ".ass", ".ssa"}
+        try:
+            candidates = list(parent.iterdir())
+        except OSError:
+            return None
+        for candidate in candidates:
+            if not candidate.is_file() or candidate.suffix.lower() not in subtitle_exts:
+                continue
+            candidate_stem = candidate.stem.lower()
+            if (
+                candidate_stem == stem_lower
+                or candidate_stem.startswith(f"{stem_lower}.")
+                or candidate_stem.startswith(f"{stem_lower}_")
+            ):
+                return candidate
 
         return None
 
@@ -95,12 +113,17 @@ class FFmpegEngine:
 
         temp_out = video_path.with_name(f".tmp_embed_{video_path.name}")
 
-        # Choose subtitle codec depending on container
+        # Choose subtitle codec depending on container.
         ext = video_path.suffix.lower()
-        sub_codec = "mov_text" if ext in [".mp4", ".m4v", ".mov"] else "copy"
+        if ext in [".mp4", ".m4v", ".mov"]:
+            sub_codec = "mov_text"
+        elif ext == ".webm":
+            sub_codec = "webvtt"
+        else:
+            sub_codec = "copy"
 
         cmd = [
-            self._ffmpeg_path,
+            self._require_ffmpeg(),
             "-y",  # Overwrite output
             "-i",
             str(video_path),
@@ -112,7 +135,7 @@ class FFmpegEngine:
             "copy",
             "-c:s",
             sub_codec,
-            f"-metadata:s:s:0",
+            "-metadata:s:s:0",
             f"language={language}",
             "-map",
             "0:v",
@@ -126,17 +149,24 @@ class FFmpegEngine:
         try:
             res = subprocess.run(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
                 timeout=300,
+                check=False,
             )
-            if res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 0:
+            if (
+                res.returncode == 0
+                and temp_out.exists()
+                and temp_out.stat().st_size > 0
+            ):
                 # Atomically replace video file
                 video_path.unlink(missing_ok=True)
                 temp_out.rename(video_path)
                 # Cleanup standalone subtitle file after successful embedding
-                subtitle_path.unlink(missing_ok=True)
+                try:
+                    subtitle_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 return True
             else:
                 if temp_out.exists():
@@ -146,9 +176,11 @@ class FFmpegEngine:
         except Exception as e:
             if temp_out.exists():
                 temp_out.unlink(missing_ok=True)
-            if isinstance(e, (FFmpegNotFoundError, MuxingError)):
+            if isinstance(e, FFmpegNotFoundError):
                 raise
-            raise MuxingError("Subtitle embedding failed", str(e))
+            if isinstance(e, MuxingError):
+                raise
+            raise MuxingError("Subtitle embedding failed", str(e)) from e
 
     def scan_directory_for_pairs(self, directory: Path) -> List[BatchItem]:
         """Scan a folder for video files and check for matching subtitle files."""
@@ -158,7 +190,12 @@ class FFmpegEngine:
 
         video_extensions = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
 
-        for entry in sorted(directory.iterdir()):
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            return items
+
+        for entry in entries:
             if entry.is_file() and entry.suffix.lower() in video_extensions:
                 if entry.name.startswith(".tmp_") or "_temp" in entry.stem:
                     continue

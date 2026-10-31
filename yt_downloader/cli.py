@@ -2,31 +2,45 @@
 Enhanced CLI and scriptable entry point for YT-Downloader using Rich and Clean Architecture.
 """
 
-import sys
-import json
 import argparse
+import json
+import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
-from rich.table import Table
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
-    TransferSpeedColumn,
+    TextColumn,
     TimeRemainingColumn,
+    TransferSpeedColumn,
 )
+from rich.table import Table
 
-from yt_downloader.core.enums import QualityPreset, AudioFormat, AudioBitrate, SubtitleMode, TaskStatus
-from yt_downloader.core.models import DownloadConfig, DownloadTask, TaskProgress, format_bytes
+from yt_downloader.core.enums import (
+    AudioBitrate,
+    AudioFormat,
+    QualityPreset,
+    SubtitleMode,
+    TaskStatus,
+)
+from yt_downloader.core.models import (
+    DownloadConfig,
+    DownloadTask,
+    PlaylistInfo,
+    TaskProgress,
+    format_bytes,
+)
 from yt_downloader.infrastructure.ffmpeg_engine import FFmpegEngine
 from yt_downloader.infrastructure.ytdlp_engine import YtDlpEngine
-from yt_downloader.services.media_service import MediaService
 from yt_downloader.services.history_service import HistoryService
+from yt_downloader.services.media_service import MediaService
 from yt_downloader.ui.interactive_menu import InteractiveConsoleApp
 
 console = Console()
@@ -37,12 +51,14 @@ def print_media_info_card(media_item) -> None:
     table.add_column(style="cyan bold", justify="right")
     table.add_column(style="white")
 
-    table.add_row("Title:", media_item.title)
-    table.add_row("Channel / Uploader:", media_item.uploader)
+    table.add_row("Title:", escape(str(media_item.title)))
+    table.add_row("Channel / Uploader:", escape(str(media_item.uploader)))
     table.add_row("Duration:", media_item.duration_str)
     table.add_row("View Count:", f"{media_item.view_count:,}")
     table.add_row("Upload Date:", media_item.upload_date or "N/A")
-    table.add_row("Available Resolutions:", ", ".join(media_item.available_resolutions) or "N/A")
+    table.add_row(
+        "Available Resolutions:", ", ".join(media_item.available_resolutions) or "N/A"
+    )
 
     console.print(
         Panel(
@@ -69,7 +85,7 @@ def execute_cli_download(
         config=config,
     )
 
-    console.print(f"[bold cyan]⚡ Connecting to stream:[/bold cyan] {url}")
+    console.print(f"[bold cyan]⚡ Connecting to stream:[/bold cyan] {escape(url)}")
 
     with Progress(
         SpinnerColumn(),
@@ -81,7 +97,7 @@ def execute_cli_download(
         TimeRemainingColumn(),
         console=console,
     ) as progress:
-        bar_task = progress.add_task(f"Downloading...", total=None, size_text="")
+        bar_task = progress.add_task("Downloading...", total=None, size_text="")
 
         def on_progress(p: TaskProgress):
             if p.status == TaskStatus.DOWNLOADING:
@@ -96,42 +112,65 @@ def execute_cli_download(
                         bar_task,
                         completed=cur,
                         total=tot,
-                        description=f"{p.current_file[:25] or 'Downloading'}",
+                        description=f"{escape(p.current_file[:25]) or 'Downloading'}",
                         size_text=size_str,
                     )
                 else:
                     progress.update(
                         bar_task,
-                        description=f"{p.current_file[:25] or 'Downloading'}",
+                        description=f"{escape(p.current_file[:25]) or 'Downloading'}",
                         size_text=size_str,
                     )
             elif p.status == TaskStatus.PROCESSING:
-                progress.update(bar_task, description="[bold yellow]Processing / Muxing...")
+                progress.update(
+                    bar_task, description="[bold yellow]Processing / Muxing..."
+                )
 
         try:
-            output_file = ytdlp_engine.download_stream(task, progress_callback=on_progress)
+            output_file = ytdlp_engine.download_stream(
+                task, progress_callback=on_progress
+            )
             if output_file and output_file.exists():
-                progress.update(bar_task, completed=100, total=100, description="[bold green]✓ Completed")
-                console.print(f"\n[bold green]✓ Saved file to:[/bold green] {output_file.resolve()}\n")
+                progress.update(
+                    bar_task,
+                    completed=100,
+                    total=100,
+                    description="[bold green]✓ Completed",
+                )
+                console.print(
+                    f"\n[bold green]✓ Saved file to:[/bold green] {escape(str(output_file.resolve()))}\n"
+                )
 
                 media_type = "audio" if config.audio_only else "video"
-                quality_str = config.audio_format.value if config.audio_only else config.quality.value
-                history_service.record_completed_download(
-                    task_id=task.id,
-                    url=url,
-                    title=task.title,
-                    uploader="YouTube",
-                    duration_str="--:--",
-                    file_path=output_file,
-                    media_type=media_type,
-                    quality_or_format=quality_str,
+                quality_str = (
+                    config.audio_format.value
+                    if config.audio_only
+                    else config.quality.value
                 )
+                try:
+                    history_service.record_completed_download(
+                        task_id=task.id,
+                        url=url,
+                        title=task.title,
+                        uploader="YouTube",
+                        duration_str="--:--",
+                        file_path=output_file,
+                        media_type=media_type,
+                        quality_or_format=quality_str,
+                    )
+                except Exception as history_error:
+                    console.print(
+                        "[bold yellow]⚠ Download succeeded, but history "
+                        f"could not be saved:[/bold yellow] {escape(str(history_error))}"
+                    )
                 return True
             else:
-                console.print("\n[bold red]✗ Download failed: file not found.[/bold red]")
+                console.print(
+                    "\n[bold red]✗ Download failed: file not found.[/bold red]"
+                )
                 return False
         except Exception as e:
-            console.print(f"\n[bold red]✗ Download error:[/bold red] {str(e)}")
+            console.print(f"\n[bold red]✗ Download error:[/bold red] {e!s}")
             return False
 
 
@@ -147,7 +186,12 @@ def main():
         version="⚡ YT-Downloader Pro 2.0.0",
         help="Show program version and exit",
     )
-    parser.add_argument("--url", "-u", type=str, help="YouTube video or playlist URL for direct download")
+    parser.add_argument(
+        "--url",
+        "-u",
+        type=str,
+        help="YouTube video or playlist URL for direct download",
+    )
     parser.add_argument(
         "--quality",
         "-q",
@@ -156,7 +200,9 @@ def main():
         choices=["best", "2160p", "1440p", "1080p", "720p", "480p", "360p"],
         help="Video target quality (default: 1080p)",
     )
-    parser.add_argument("--audio-only", "-a", action="store_true", help="Extract audio stream only")
+    parser.add_argument(
+        "--audio-only", "-a", action="store_true", help="Extract audio stream only"
+    )
     parser.add_argument(
         "--audio-format",
         type=str,
@@ -179,33 +225,47 @@ def main():
         choices=["embed", "separate", "none"],
         help="Subtitle handling strategy (default: embed)",
     )
-    parser.add_argument("--output-dir", "-o", type=str, default="downloads", help="Output directory")
-    parser.add_argument("--info", "-i", action="store_true", help="Inspect URL metadata without downloading")
-    parser.add_argument("--json", action="store_true", help="Print inspected metadata as JSON")
+    parser.add_argument(
+        "--output-dir", "-o", type=str, default="downloads", help="Output directory"
+    )
+    parser.add_argument(
+        "--info",
+        "-i",
+        action="store_true",
+        help="Inspect URL metadata without downloading",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print inspected metadata as JSON"
+    )
 
     args = parser.parse_args()
 
     # 1. Direct CLI Mode (flags provided)
     if args.url or args.info:
         if not args.url:
-            console.print("[bold red]Error: --url is required when using CLI mode[/bold red]")
+            console.print(
+                "[bold red]Error: --url is required when using CLI mode[/bold red]"
+            )
             sys.exit(1)
 
         media_service = MediaService()
 
         if args.info:
-            item_type, entity = media_service.inspect_url(args.url)
+            _, entity = media_service.inspect_url(args.url)
             if not entity:
                 console.print("[bold red]Failed to inspect URL metadata.[/bold red]")
                 sys.exit(1)
 
             if args.json:
-                print(json.dumps(entity.__dict__, default=str, indent=2))
+                print(json.dumps(asdict(entity), default=str, indent=2))
             else:
-                if item_type == "video":
-                    print_media_info_card(entity)
+                if isinstance(entity, PlaylistInfo):
+                    console.print(
+                        f"[bold cyan]📚 Playlist:[/bold cyan] {escape(entity.title)} "
+                        f"({len(entity.entries)} items)"
+                    )
                 else:
-                    console.print(f"[bold cyan]📚 Playlist:[/bold cyan] {entity.title} ({len(entity.entries)} items)")
+                    print_media_info_card(entity)
             sys.exit(0)
 
         config = DownloadConfig(

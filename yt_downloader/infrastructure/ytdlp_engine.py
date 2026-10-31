@@ -2,30 +2,57 @@
 Robust yt-dlp Infrastructure Adapter for metadata extraction and media stream downloads.
 """
 
+import re
 import threading
-import time
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, List
-import yt_dlp
+from typing import Any, Callable, Dict, List, Optional, cast
 
-from yt_downloader.core.enums import QualityPreset, AudioFormat, SubtitleMode, TaskStatus
+import yt_dlp
+from yt_dlp.utils import DownloadCancelled
+
+from yt_downloader.core.enums import QualityPreset, SubtitleMode, TaskStatus
 from yt_downloader.core.exceptions import (
-    MetadataExtractionError,
-    DownloadError,
-    StreamNotFoundError,
     CancelledError,
+    DownloadError,
+    MetadataExtractionError,
 )
 from yt_downloader.core.models import (
-    MediaItem,
-    StreamInfo,
-    PlaylistItem,
-    PlaylistInfo,
+    DownloadConfig,
     DownloadTask,
+    MediaItem,
+    PlaylistInfo,
+    PlaylistItem,
+    StreamInfo,
     TaskProgress,
-    format_seconds,
     format_bytes,
+    format_seconds,
 )
 from yt_downloader.infrastructure.ffmpeg_engine import FFmpegEngine
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _clean_error_message(message: Any) -> str:
+    """Remove terminal color codes from yt-dlp error text."""
+    return _ANSI_ESCAPE.sub("", str(message)).strip()
+
+
+def _as_entry_list(entries: Any) -> List[Any]:
+    """Normalize yt-dlp entry containers (list, generator, or PagedList)."""
+    if not entries:
+        return []
+    if isinstance(entries, (list, tuple)):
+        return list(entries)
+    getslice = cast(Optional[Callable[[], List[Any]]], getattr(entries, "getslice", None))
+    if callable(getslice):
+        try:
+            return list(getslice())
+        except Exception:
+            return []
+    try:
+        return list(entries)
+    except TypeError:
+        return []
 
 
 class YtDlpEngine:
@@ -38,6 +65,7 @@ class YtDlpEngine:
         return {
             "quiet": True,
             "no_warnings": True,
+            "color": "no_color",
             "socket_timeout": 30,
             "retries": 5,
             "fragment_retries": 5,
@@ -48,22 +76,23 @@ class YtDlpEngine:
     def fetch_media_info(self, url: str) -> Optional[MediaItem]:
         """Extract rich video metadata and available stream formats."""
         opts = self._base_ydl_opts()
-        opts.update({
-            "skip_download": True,
-            "extract_flat": False,
-        })
+        opts.update(
+            {
+                "skip_download": True,
+                "extract_flat": False,
+            }
+        )
 
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if not info:
                     return None
 
                 # If this resolved into a playlist entry dictionary
-                if "entries" in info and info["entries"]:
-                    first_entry = info["entries"][0]
-                    if first_entry:
-                        info = first_entry
+                entry_list = _as_entry_list(info.get("entries"))
+                if entry_list and entry_list[0]:
+                    info = entry_list[0]
 
                 dur = int(info.get("duration") or 0)
                 resolutions = set()
@@ -77,21 +106,31 @@ class YtDlpEngine:
                     streams.append(
                         StreamInfo(
                             format_id=str(f.get("format_id", "")),
-                            resolution=f"{f.get('height', 'audio')}p" if f.get("height") else "audio",
+                            resolution=f"{f.get('height', 'audio')}p"
+                            if f.get("height")
+                            else "audio",
                             ext=f.get("ext", "mp4"),
                             vcodec=f.get("vcodec", "none"),
                             acodec=f.get("acodec", "none"),
-                            filesize_approx=int(f.get("filesize") or f.get("filesize_approx") or 0),
+                            filesize_approx=int(
+                                f.get("filesize") or f.get("filesize_approx") or 0
+                            ),
                             fps=f.get("fps"),
-                            is_video=bool(f.get("vcodec") and f.get("vcodec") != "none"),
-                            is_audio=bool(f.get("acodec") and f.get("acodec") != "none"),
+                            is_video=bool(
+                                f.get("vcodec") and f.get("vcodec") != "none"
+                            ),
+                            is_audio=bool(
+                                f.get("acodec") and f.get("acodec") != "none"
+                            ),
                         )
                     )
 
                 # Order resolutions
                 sorted_res = sorted(
                     list(resolutions),
-                    key=lambda r: int(r.replace("p", "")) if r.replace("p", "").isdigit() else 0,
+                    key=lambda r: (
+                        int(r.replace("p", "")) if r.replace("p", "").isdigit() else 0
+                    ),
                     reverse=True,
                 )
 
@@ -119,32 +158,39 @@ class YtDlpEngine:
                     streams=streams,
                 )
         except Exception as e:
-            raise MetadataExtractionError("Could not retrieve video info", str(e))
+            raise MetadataExtractionError(
+                "Could not retrieve video info", _clean_error_message(e)
+            ) from e
 
     def fetch_playlist_info(self, url: str) -> Optional[PlaylistInfo]:
         """Extract playlist entries using fast flat-extraction."""
         opts = self._base_ydl_opts()
-        opts.update({
-            "skip_download": True,
-            "extract_flat": "in_playlist",
-            "noplaylist": False,
-        })
+        opts.update(
+            {
+                "skip_download": True,
+                "extract_flat": "in_playlist",
+                "noplaylist": False,
+            }
+        )
 
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if not info or "entries" not in info:
                     return None
 
                 entries: List[PlaylistItem] = []
-                for idx, entry in enumerate(info.get("entries") or [], 1):
+                raw_entries = _as_entry_list(info.get("entries"))
+                for idx, entry in enumerate(raw_entries, 1):
                     if not entry:
                         continue
                     v_id = str(entry.get("id") or "")
                     dur = int(entry.get("duration") or 0)
                     raw_url = str(entry.get("url") or "").strip()
                     if raw_url:
-                        if raw_url.startswith("http://") or raw_url.startswith("https://"):
+                        if raw_url.startswith("http://") or raw_url.startswith(
+                            "https://"
+                        ):
                             v_url = raw_url
                         elif raw_url.startswith("/"):
                             v_url = f"https://www.youtube.com{raw_url}"
@@ -157,7 +203,11 @@ class YtDlpEngine:
                     else:
                         v_url = ""
                     v_title = str(entry.get("title") or f"Video {idx}")
-                    v_uploader = str(entry.get("uploader") or entry.get("channel") or "Unknown Channel")
+                    v_uploader = str(
+                        entry.get("uploader")
+                        or entry.get("channel")
+                        or "Unknown Channel"
+                    )
                     v_thumb = str(entry.get("thumbnail") or "")
                     entries.append(
                         PlaylistItem(
@@ -174,8 +224,13 @@ class YtDlpEngine:
                     )
 
                 p_title = str(info.get("title") or "Playlist")
-                p_uploader = str(info.get("uploader") or info.get("channel") or "Unknown Channel")
-                p_thumb = str(info.get("thumbnail") or (entries[0].thumbnail_url if entries else ""))
+                p_uploader = str(
+                    info.get("uploader") or info.get("channel") or "Unknown Channel"
+                )
+                p_thumb = str(
+                    info.get("thumbnail")
+                    or (entries[0].thumbnail_url if entries else "")
+                )
 
                 return PlaylistInfo(
                     id=str(info.get("id") or ""),
@@ -187,7 +242,44 @@ class YtDlpEngine:
                     total_count=len(entries),
                 )
         except Exception as e:
-            raise MetadataExtractionError("Could not retrieve playlist info", str(e))
+            raise MetadataExtractionError(
+                "Could not retrieve playlist info", _clean_error_message(e)
+            ) from e
+
+    def _try_download_subtitles(
+        self, url: str, cfg: DownloadConfig, outtmpl: str
+    ) -> None:
+        """Fetch subtitles in a separate best-effort pass.
+
+        Subtitle endpoints fail routinely (HTTP 429, missing tracks) and the
+        media file is already on disk by the time this runs.  A dedicated
+        client with ``ignoreerrors`` is used so no subtitle problem can turn a
+        successful download into a failed one.
+        """
+        opts: Dict[str, Any] = {
+            "outtmpl": outtmpl,
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": cfg.subtitle_langs or ["en"],
+            "subtitlesformat": "srt/best",
+            "ignoreerrors": True,
+            "quiet": True,
+            "no_warnings": True,
+            "color": "no_color",
+            "noplaylist": True,
+            "socket_timeout": 30,
+            "retries": 3,
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+        try:
+            with yt_dlp.YoutubeDL(cast(Any, opts)) as ydl:
+                ydl.extract_info(url, download=True)
+        except CancelledError:
+            raise
+        except Exception:
+            # Best effort only: subtitles are optional.
+            return
 
     def download_stream(
         self,
@@ -221,7 +313,11 @@ class YtDlpEngine:
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "quiet": True,
             "no_warnings": True,
+            "color": "no_color",
             "nocheckcertificate": False,
+            # A task is always a single video.  Without this flag a URL that
+            # also contains ``list=`` would unexpectedly download a playlist.
+            "noplaylist": True,
         }
 
         if cfg.rate_limit_bytes:
@@ -231,30 +327,28 @@ class YtDlpEngine:
 
         if cfg.audio_only:
             ydl_opts["format"] = "bestaudio/best"
-            postprocessors.append({
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": cfg.audio_format.value,
-                "preferredquality": cfg.audio_bitrate.value if cfg.audio_bitrate.value != "0" else "192",
-            })
+            postprocessors.append(
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": cfg.audio_format.value,
+                    "preferredquality": cfg.audio_bitrate.value,
+                }
+            )
             if cfg.embed_metadata:
                 postprocessors.append({"key": "FFmpegMetadata", "add_chapters": True})
             if cfg.embed_thumbnail:
                 ydl_opts["writethumbnail"] = True
                 postprocessors.append({"key": "EmbedThumbnail"})
         else:
-            ydl_opts["format"] = format_map.get(cfg.quality, format_map[QualityPreset.FHD_1080P])
+            ydl_opts["format"] = format_map.get(
+                cfg.quality, format_map[QualityPreset.FHD_1080P]
+            )
             ydl_opts["merge_output_format"] = "mp4"
             if cfg.embed_metadata:
                 postprocessors.append({"key": "FFmpegMetadata", "add_chapters": True})
             if cfg.embed_thumbnail:
                 ydl_opts["writethumbnail"] = True
                 postprocessors.append({"key": "EmbedThumbnail"})
-
-        if not cfg.audio_only and cfg.subtitles != SubtitleMode.NONE:
-            ydl_opts["writesubtitles"] = True
-            ydl_opts["writeautomaticsub"] = True
-            ydl_opts["subtitleslangs"] = cfg.subtitle_langs or ["en"]
-            ydl_opts["subtitlesformat"] = "srt/best"
 
         if postprocessors:
             ydl_opts["postprocessors"] = postprocessors
@@ -282,9 +376,13 @@ class YtDlpEngine:
                 task.progress.total_bytes = int(tot)
                 task.progress.percent = (cur / tot * 100.0) if tot > 0 else 0.0
                 task.progress.speed_bytes = float(spd)
-                task.progress.speed_str = f"{format_bytes(spd)}/s" if spd > 0 else "-- B/s"
+                task.progress.speed_str = (
+                    f"{format_bytes(spd)}/s" if spd > 0 else "-- B/s"
+                )
                 task.progress.eta_seconds = eta
-                task.progress.eta_str = format_seconds(eta) if eta is not None else "--:--"
+                task.progress.eta_str = (
+                    format_seconds(eta) if eta is not None else "--:--"
+                )
                 task.progress.message = f"Downloading: {task.progress.percent:.1f}% ({task.progress.speed_str})"
 
                 if progress_callback:
@@ -300,17 +398,22 @@ class YtDlpEngine:
         ydl_opts["progress_hooks"] = [progress_hook]
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(cast(Any, ydl_opts)) as ydl:
                 info = ydl.extract_info(task.url, download=True)
                 if not info:
                     raise DownloadError("Failed to download stream: no info returned")
+
+                if cancel_event and cancel_event.is_set():
+                    raise CancelledError("Download was cancelled by user")
 
                 target_filename = ydl.prepare_filename(info)
                 downloaded_file = Path(target_filename)
 
                 # For audio post-processing, file extension changes
                 if cfg.audio_only:
-                    audio_target = downloaded_file.with_suffix(f".{cfg.audio_format.value}")
+                    audio_target = downloaded_file.with_suffix(
+                        f".{cfg.audio_format.value}"
+                    )
                     if audio_target.exists():
                         downloaded_file = audio_target
 
@@ -325,17 +428,48 @@ class YtDlpEngine:
                 # If the exact path does not exist, find closest matching file in output dir
                 if not downloaded_file.exists():
                     valid_exts = (
-                        {f".{cfg.audio_format.value}", ".mp3", ".m4a", ".flac", ".opus", ".wav", ".aac", ".ogg"}
+                        {
+                            f".{cfg.audio_format.value}",
+                            ".mp3",
+                            ".m4a",
+                            ".flac",
+                            ".opus",
+                            ".wav",
+                            ".aac",
+                            ".ogg",
+                        }
                         if cfg.audio_only
                         else {".mp4", ".mkv", ".webm", ".mov", ".avi", ".ts", ".flv"}
                     )
                     matches = [
-                        p for p in cfg.output_dir.glob(f"*{prefix_str}*")
+                        p
+                        for p in cfg.output_dir.glob(f"*{prefix_str}*")
                         if p.is_file() and p.suffix.lower() in valid_exts
                     ]
                     if matches:
                         matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                         downloaded_file = matches[0]
+
+                if not downloaded_file.exists() or not downloaded_file.is_file():
+                    raise DownloadError(
+                        "Download finished but the output file could not be found"
+                    )
+
+                # A cancel request may arrive while post-processing is running.
+                if cancel_event and cancel_event.is_set():
+                    raise CancelledError("Download was cancelled by user")
+
+                # Subtitles are optional and must never fail the media download.
+                if not cfg.audio_only and cfg.subtitles != SubtitleMode.NONE:
+                    if cancel_event and cancel_event.is_set():
+                        raise CancelledError("Download was cancelled by user")
+                    task.progress.message = "Fetching subtitles (best effort)..."
+                    if progress_callback:
+                        progress_callback(task.progress)
+                    self._try_download_subtitles(task.url, cfg, outtmpl)
+
+                if cancel_event and cancel_event.is_set():
+                    raise CancelledError("Download was cancelled by user")
 
                 # If user requested embedded subtitles and FFmpeg is available
                 if (
@@ -362,13 +496,13 @@ class YtDlpEngine:
 
                 return downloaded_file
 
-        except yt_dlp.utils.DownloadCancelled:
+        except DownloadCancelled:
             task.status = TaskStatus.CANCELLED
             task.progress.status = TaskStatus.CANCELLED
             task.progress.message = "Cancelled"
             if progress_callback:
                 progress_callback(task.progress)
-            raise CancelledError("Download cancelled")
+            raise CancelledError("Download cancelled") from None
         except CancelledError:
             task.status = TaskStatus.CANCELLED
             task.progress.status = TaskStatus.CANCELLED
@@ -376,11 +510,21 @@ class YtDlpEngine:
             if progress_callback:
                 progress_callback(task.progress)
             raise
-        except Exception as e:
+        except DownloadError as e:
+            message = _clean_error_message(e)
             task.status = TaskStatus.FAILED
             task.progress.status = TaskStatus.FAILED
-            task.progress.message = f"Error: {str(e)}"
-            task.error_message = str(e)
+            task.progress.message = f"Error: {message}"
+            task.error_message = message
             if progress_callback:
                 progress_callback(task.progress)
-            raise DownloadError(f"Download failed: {str(e)}")
+            raise
+        except Exception as e:
+            message = _clean_error_message(e)
+            task.status = TaskStatus.FAILED
+            task.progress.status = TaskStatus.FAILED
+            task.progress.message = f"Error: {message}"
+            task.error_message = message
+            if progress_callback:
+                progress_callback(task.progress)
+            raise DownloadError(message) from e

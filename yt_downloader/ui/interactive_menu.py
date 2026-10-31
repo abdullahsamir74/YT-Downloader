@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Optional, List, Tuple, Any
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Prompt
@@ -217,8 +218,8 @@ class InteractiveConsoleApp:
         info_table = Table.grid(padding=(0, 2))
         info_table.add_column(style="cyan", justify="right")
         info_table.add_column(style="bold white")
-        info_table.add_row("Title:", item.title)
-        info_table.add_row("Channel:", item.uploader)
+        info_table.add_row("Title:", escape(str(item.title)))
+        info_table.add_row("Channel:", escape(str(item.uploader)))
         info_table.add_row("Duration:", item.duration_str)
         info_table.add_row("Views:", f"{item.view_count:,}")
         info_table.add_row("Available Streams:", ", ".join(item.available_resolutions[:6]) or "Auto")
@@ -230,14 +231,22 @@ class InteractiveConsoleApp:
         summary_table.add_column(style="cyan bold", justify="right")
         summary_table.add_column(style="bold white")
 
-        summary_table.add_row("Title:", title)
+        summary_table.add_row("Title:", escape(str(title)))
         if config.audio_only:
-            summary_table.add_row("Extraction Mode:", f"[bold green]Audio Only ({config.audio_format.value.upper()} @ {config.audio_bitrate.value} kbps)[/bold green]")
+            bitrate_label = (
+                "Auto (best VBR)"
+                if config.audio_bitrate.value == "0"
+                else f"{config.audio_bitrate.value} kbps"
+            )
+            summary_table.add_row(
+                "Extraction Mode:",
+                f"[bold green]Audio Only ({config.audio_format.value.upper()} @ {bitrate_label})[/bold green]",
+            )
         else:
             summary_table.add_row("Target Quality:", f"[bold green]{config.quality.value} ({config.quality.label})[/bold green]")
             summary_table.add_row("Subtitles:", f"[yellow]{config.subtitles.label}[/yellow]")
 
-        summary_table.add_row("Save Destination:", str(Path(config.output_dir).resolve()))
+        summary_table.add_row("Save Destination:", escape(str(Path(config.output_dir).resolve())))
         summary_table.add_row("Post-Processing:", "Embed Cover Art • Embed ID3 Metadata & Chapters")
 
         console.print(Panel(summary_table, title="[bold cyan]🚀 Download Summary & Plan[/bold cyan]", border_style="cyan", padding=(0, 2)))
@@ -250,11 +259,11 @@ class InteractiveConsoleApp:
         summary_table.add_column(style="cyan bold", justify="right")
         summary_table.add_column(style="bold white")
 
-        summary_table.add_row("Playlist:", playlist_title)
+        summary_table.add_row("Playlist:", escape(str(playlist_title)))
         summary_table.add_row("Selected Videos:", f"[bold green]{total_items} video(s) selected[/bold green]")
         summary_table.add_row("Target Quality:", f"[bold green]{quality.value} ({quality.label})[/bold green]")
         summary_table.add_row("Subtitles:", f"[yellow]{subtitles.label}[/yellow]")
-        summary_table.add_row("Save Destination:", str(Path(self.config_service.config.default_output_dir).resolve()))
+        summary_table.add_row("Save Destination:", escape(str(Path(self.config_service.config.default_output_dir).resolve())))
         summary_table.add_row("Post-Processing:", "Embed Cover Art • Embed ID3 Metadata & Chapters")
 
         console.print(Panel(summary_table, title="[bold cyan]🚀 Playlist Download Summary & Plan[/bold cyan]", border_style="cyan", padding=(0, 2)))
@@ -317,6 +326,9 @@ class InteractiveConsoleApp:
                 step = 4
 
             elif step == 4:
+                if item is None or quality is None or subtitles is None:
+                    step = 1
+                    continue
                 config = DownloadConfig(
                     quality=quality,
                     audio_only=False,
@@ -362,15 +374,15 @@ class InteractiveConsoleApp:
                     self._wait_enter()
                     continue
 
-                console.print(f"\n[bold green]Found {len(info.entries)} videos in playlist:[/bold green] {info.title}")
+                console.print(f"\n[bold green]Found {len(info.entries)} videos in playlist:[/bold green] {escape(info.title)}")
 
-                table = Table(title=info.title, border_style="cyan")
+                table = Table(title=escape(info.title), border_style="cyan")
                 table.add_column("#", style="cyan", justify="right")
                 table.add_column("Title", style="white")
                 table.add_column("Duration", style="yellow")
 
                 for entry in info.entries[:25]:
-                    title_display = (entry.title or f"Video {entry.index}")[:55]
+                    title_display = escape((entry.title or f"Video {entry.index}")[:55])
                     table.add_row(f"{entry.index:02d}", title_display, entry.duration_str)
 
                 if len(info.entries) > 25:
@@ -380,6 +392,9 @@ class InteractiveConsoleApp:
                 step = 2
 
             elif step == 2:
+                if info is None:
+                    step = 1
+                    continue
                 scope_options = [
                     (f"Download ALL ({len(info.entries)}) videos in playlist", "all"),
                     ("Select specific video numbers or range (e.g. 1-5, 8, 10-12)", "range"),
@@ -401,6 +416,9 @@ class InteractiveConsoleApp:
                     step = 4
 
             elif step == 3:
+                if info is None:
+                    step = 1
+                    continue
                 range_str = Prompt.ask("Enter video numbers or range (e.g. 1-5, 8, 10-12) or 0 to go back")
                 if range_str.strip() == "0":
                     step = 2
@@ -451,7 +469,17 @@ class InteractiveConsoleApp:
                 step = 6
 
             elif step == 6:
-                self._print_playlist_summary_card(info.title, len(selected_entries), quality, subtitles)
+                if (
+                    info is None
+                    or quality is None
+                    or subtitles is None
+                    or not selected_entries
+                ):
+                    step = 1
+                    continue
+                self._print_playlist_summary_card(
+                    info.title, len(selected_entries), quality, subtitles
+                )
                 pad = len(str(len(selected_entries)))
                 for i, item in enumerate(selected_entries, 1):
                     prefix = str(i).zfill(pad)
@@ -465,7 +493,9 @@ class InteractiveConsoleApp:
                         custom_prefix=prefix,
                     )
                     v_title = item.title or f"Video {i}"
-                    console.print(f"\n[bold cyan][{i}/{len(selected_entries)}][/bold cyan] {v_title}")
+                    console.print(
+                        f"\n[bold cyan][{i}/{len(selected_entries)}][/bold cyan] {escape(v_title)}"
+                    )
                     self._execute_live_download(item.url, cfg, v_title)
 
                 console.print("\n[bold green]✓ Playlist Download Finished![/bold green]")
@@ -498,7 +528,7 @@ class InteractiveConsoleApp:
                     item = self.media_service.fetch_video(url)
 
                 if item:
-                    console.print(f"🎵 [bold green]{item.title}[/bold green] ([yellow]{item.duration_str}[/yellow]) by [cyan]{item.uploader}[/cyan]")
+                    console.print(f"🎵 [bold green]{escape(item.title)}[/bold green] ([yellow]{item.duration_str}[/yellow]) by [cyan]{escape(item.uploader)}[/cyan]")
                 step = 2
 
             elif step == 2:
@@ -526,6 +556,9 @@ class InteractiveConsoleApp:
                 step = 4
 
             elif step == 4:
+                if fmt is None or bitrate is None:
+                    step = 1
+                    continue
                 title = item.title if item else "Audio Track"
                 config = DownloadConfig(
                     audio_only=True,
@@ -564,7 +597,7 @@ class InteractiveConsoleApp:
                     self._wait_enter()
                     continue
 
-                table = Table(title=f"Scanned Directory: {folder}", border_style="cyan")
+                table = Table(title=f"Scanned Directory: {escape(str(folder))}", border_style="cyan")
                 table.add_column("Status", style="bold")
                 table.add_column("Video File", style="white")
                 table.add_column("Subtitle Candidate", style="yellow")
@@ -573,7 +606,7 @@ class InteractiveConsoleApp:
                 for it in items:
                     st = "[bold green]✓ Ready[/bold green]" if it.status == "ready" else "[bold red]✗ Missing Sub[/bold red]"
                     sub_name = it.subtitle_file.name if it.subtitle_file else "None"
-                    table.add_row(st, it.video_file.name, sub_name)
+                    table.add_row(st, escape(it.video_file.name), escape(sub_name))
 
                 console.print(table)
 
@@ -600,11 +633,36 @@ class InteractiveConsoleApp:
                     continue
 
                 with Progress(console=console) as progress:
-                    p_task = progress.add_task("Embedding subtitles...", total=len(ready))
-                    for it in ready:
-                        self.subtitle_service.embed_file(it.video_file, it.subtitle_file)
-                        progress.advance(p_task)
-                console.print("\n[bold green]✓ All subtitles embedded successfully![/bold green]")
+                    p_task = progress.add_task(
+                        "Embedding subtitles...", total=len(ready)
+                    )
+
+                    def on_item(idx: int, _total: int, item, _task=p_task) -> None:
+                        progress.update(
+                            _task,
+                            completed=idx,
+                            description=f"Embedding {item.video_file.name[:35]}",
+                        )
+
+                    results = self.subtitle_service.batch_embed(ready, on_item)
+
+                failed = [item for item in results if item.status == "error"]
+                if failed:
+                    console.print(
+                        f"\n[bold red]✗ {len(failed)} subtitle embedding(s) failed:[/bold red]"
+                    )
+                    for item in failed:
+                        console.print(
+                            f"  [red]• {escape(item.video_file.name)}:[/red] "
+                            f"{escape(item.error or 'unknown error')}"
+                        )
+                    console.print(
+                        f"[bold green]✓ {len(results) - len(failed)} succeeded.[/bold green]"
+                    )
+                else:
+                    console.print(
+                        f"\n[bold green]✓ All {len(results)} subtitles embedded successfully![/bold green]"
+                    )
                 self._wait_enter()
                 return
 
@@ -631,7 +689,14 @@ class InteractiveConsoleApp:
             table.add_column("Date", style="dim")
 
             for idx, r in enumerate(records[:20], 1):
-                table.add_row(str(idx), r.title[:45], r.media_type.upper(), r.quality_or_format, r.file_size_str, r.completed_at)
+                table.add_row(
+                    str(idx),
+                    escape(r.title[:45]),
+                    r.media_type.upper(),
+                    escape(r.quality_or_format),
+                    r.file_size_str,
+                    r.completed_at,
+                )
 
             console.print(table)
 
@@ -645,27 +710,40 @@ class InteractiveConsoleApp:
             if action is None:
                 return
 
+            # Only the records shown in the table are addressable by number.
+            displayed_records = records[:20]
+            max_record = len(displayed_records)
+
             if action == "open_file":
-                num = Prompt.ask(f"Enter record number [1-{min(20, len(records))}] (or 0 to cancel)", default="1")
+                num = Prompt.ask(f"Enter record number [1-{max_record}] (or 0 to cancel)", default="1")
                 if num.strip() != "0":
                     try:
                         rec_idx = int(num) - 1
-                        if 0 <= rec_idx < len(records):
-                            self.history_service.open_file_in_system(records[rec_idx].file_path)
-                    except Exception:
-                        pass
+                        if 0 <= rec_idx < max_record:
+                            if not self.history_service.open_file_in_system(
+                                displayed_records[rec_idx].file_path
+                            ):
+                                console.print(
+                                    "[bold red]✗ Could not open the file. It may have been moved or deleted.[/bold red]"
+                                )
+                        else:
+                            console.print("[bold red]✗ Invalid record number.[/bold red]")
+                    except ValueError:
+                        console.print("[bold red]✗ Invalid record number.[/bold red]")
             elif action == "open_folder":
                 self.history_service.open_folder_in_system(self.config_service.config.default_output_dir)
             elif action == "delete_record":
-                num = Prompt.ask(f"Enter record number to delete [1-{min(20, len(records))}] (or 0 to cancel)", default="1")
+                num = Prompt.ask(f"Enter record number to delete [1-{max_record}] (or 0 to cancel)", default="1")
                 if num.strip() != "0":
                     try:
                         rec_idx = int(num) - 1
-                        if 0 <= rec_idx < len(records):
-                            self.history_service.delete(records[rec_idx].id)
+                        if 0 <= rec_idx < max_record:
+                            self.history_service.delete(displayed_records[rec_idx].id)
                             console.print("[bold green]✓ Record removed![/bold green]")
-                    except Exception:
-                        pass
+                        else:
+                            console.print("[bold red]✗ Invalid record number.[/bold red]")
+                    except ValueError:
+                        console.print("[bold red]✗ Invalid record number.[/bold red]")
             elif action == "clear_history":
                 confirm = prompt_numbered_choice(
                     "Confirm clear all history?",
@@ -688,7 +766,7 @@ class InteractiveConsoleApp:
             settings_table = Table.grid(padding=(0, 2))
             settings_table.add_column(style="cyan", justify="right")
             settings_table.add_column(style="bold white")
-            settings_table.add_row("1. Default Output Directory:", cfg.default_output_dir)
+            settings_table.add_row("1. Default Output Directory:", escape(cfg.default_output_dir))
             settings_table.add_row("2. Default Quality:", f"{cfg.default_quality.value} ({cfg.default_quality.label})")
             settings_table.add_row("3. Default Audio Codec:", f"{cfg.default_audio_format.value.upper()} ({cfg.default_audio_format.label})")
             settings_table.add_row("4. Default Subtitles Mode:", cfg.default_subtitle_mode.label)
@@ -773,7 +851,7 @@ class InteractiveConsoleApp:
             TimeRemainingColumn(),
             console=console,
         ) as progress:
-            bar = progress.add_task(f"{title[:35]}", total=None, size_text="")
+            bar = progress.add_task(escape(title[:35]), total=None, size_text="")
 
             def on_progress(p: TaskProgress):
                 if p.status == TaskStatus.DOWNLOADING:
@@ -802,41 +880,55 @@ class InteractiveConsoleApp:
                     completion_table.add_column(style="white")
                     completion_table.add_row("Quality:", f"[bold cyan]{quality_tag}[/bold cyan]")
                     completion_table.add_row("File Size:", f"[bold green]{file_size}[/bold green]")
-                    completion_table.add_row("Saved Location:", str(out.resolve()))
+                    completion_table.add_row("Saved Location:", escape(str(out.resolve())))
 
                     console.print()
                     console.print(Panel(completion_table, title="[bold green]✓ Download Finished Successfully[/bold green]", border_style="green", padding=(0, 2)))
 
                     media_type = "audio" if config.audio_only else "video"
                     quality_str = config.audio_format.value if config.audio_only else config.quality.value
-                    self.history_service.record_completed_download(
-                        task_id=task.id,
-                        url=url,
-                        title=task.title,
-                        uploader="YouTube",
-                        duration_str="--:--",
-                        file_path=out,
-                        media_type=media_type,
-                        quality_or_format=quality_str,
+                    try:
+                        self.history_service.record_completed_download(
+                            task_id=task.id,
+                            url=url,
+                            title=task.title,
+                            uploader="YouTube",
+                            duration_str="--:--",
+                            file_path=out,
+                            media_type=media_type,
+                            quality_or_format=quality_str,
+                        )
+                    except Exception as history_error:
+                        console.print(
+                            "[bold yellow]⚠ Download succeeded, but history "
+                            f"could not be saved:[/bold yellow] {escape(str(history_error))}"
+                        )
+                else:
+                    console.print(
+                        "\n[bold red]✗ Download failed: no output file was created.[/bold red]"
                     )
             except Exception as e:
-                console.print(f"\n[bold red]✗ Download failed:[/bold red] {str(e)}")
+                console.print(f"\n[bold red]✗ Download failed:[/bold red] {e!s}")
 
     @staticmethod
     def _parse_range(range_str: str, max_val: int) -> List[int]:
         res = set()
         for part in range_str.split(","):
             part = part.strip()
+            if not part:
+                continue
             if "-" in part:
                 try:
                     start, end = part.split("-", 1)
                     s, e = int(start.strip()), int(end.strip())
-                    for i in range(max(1, s), min(max_val, e) + 1):
-                        res.add(i)
-                except Exception:
-                    pass
+                except (TypeError, ValueError):
+                    continue
+                if s > e:
+                    s, e = e, s
+                for i in range(max(1, s), min(max_val, e) + 1):
+                    res.add(i)
             elif part.isdigit():
                 val = int(part)
                 if 1 <= val <= max_val:
                     res.add(val)
-        return sorted(list(res))
+        return sorted(res)

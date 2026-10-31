@@ -2,11 +2,16 @@
 Configuration Service for managing application settings and preferences.
 """
 
-from typing import Optional, Callable, List
-from pathlib import Path
+from typing import Callable, List, Optional
 
+from yt_downloader.core.enums import (
+    AudioBitrate,
+    AudioFormat,
+    QualityPreset,
+    SubtitleMode,
+    ThemeName,
+)
 from yt_downloader.core.models import AppConfig
-from yt_downloader.core.enums import QualityPreset, AudioFormat, AudioBitrate, SubtitleMode, ThemeName
 from yt_downloader.infrastructure.storage import SettingsStore
 
 
@@ -51,7 +56,9 @@ class ConfigService:
         if default_subtitle_mode is not None:
             self._config.default_subtitle_mode = default_subtitle_mode
         if max_concurrent_downloads is not None:
-            self._config.max_concurrent_downloads = max(1, min(10, max_concurrent_downloads))
+            self._config.max_concurrent_downloads = max(
+                1, min(10, max_concurrent_downloads)
+            )
         if theme is not None:
             self._config.theme = theme
         if embed_metadata_default is not None:

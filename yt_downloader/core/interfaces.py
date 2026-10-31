@@ -2,19 +2,18 @@
 Interface protocols for YT-Downloader Clean Architecture.
 """
 
-from typing import Protocol, List, Optional, Callable, Dict, Any
-from pathlib import Path
 import threading
+from pathlib import Path
+from typing import Callable, List, Optional, Protocol
 
 from yt_downloader.core.models import (
+    AppConfig,
+    BatchItem,
+    DownloadTask,
+    HistoryRecord,
     MediaItem,
     PlaylistInfo,
-    DownloadConfig,
-    DownloadTask,
     TaskProgress,
-    BatchItem,
-    HistoryRecord,
-    AppConfig,
 )
 
 
@@ -68,24 +67,18 @@ class ISubtitleEngine(Protocol):
 class IHistoryRepository(Protocol):
     """Protocol for storing and retrieving download history."""
 
-    def add_record(self, record: HistoryRecord) -> None:
-        ...
+    def add_record(self, record: HistoryRecord) -> None: ...
 
-    def list_records(self) -> List[HistoryRecord]:
-        ...
+    def list_records(self) -> List[HistoryRecord]: ...
 
-    def delete_record(self, record_id: str) -> bool:
-        ...
+    def delete_record(self, record_id: str) -> bool: ...
 
-    def clear_all(self) -> None:
-        ...
+    def clear_all(self) -> None: ...
 
 
 class ISettingsRepository(Protocol):
     """Protocol for reading and persisting user preferences."""
 
-    def load_config(self) -> AppConfig:
-        ...
+    def load_config(self) -> AppConfig: ...
 
-    def save_config(self, config: AppConfig) -> None:
-        ...
+    def save_config(self, config: AppConfig) -> None: ...

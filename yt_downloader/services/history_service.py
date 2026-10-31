@@ -7,7 +7,7 @@ import platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from yt_downloader.core.models import HistoryRecord, format_bytes
 from yt_downloader.infrastructure.storage import HistoryStore
@@ -58,8 +58,11 @@ class HistoryService:
         if not q:
             return self.list_all()
         return [
-            r for r in self.list_all()
-            if q in r.title.lower() or q in r.uploader.lower() or q in r.quality_or_format.lower()
+            r
+            for r in self.list_all()
+            if q in r.title.lower()
+            or q in r.uploader.lower()
+            or q in r.quality_or_format.lower()
         ]
 
     def delete(self, record_id: str) -> bool:
@@ -105,7 +108,10 @@ class HistoryService:
                     start_new_session=True,
                 )
             elif sys_name == "Windows":
-                os.startfile(str(path))
+                startfile = getattr(os, "startfile", None)
+                if startfile is None:
+                    return False
+                startfile(str(path))
             return True
         except Exception:
             return False
@@ -134,7 +140,10 @@ class HistoryService:
                     start_new_session=True,
                 )
             elif sys_name == "Windows":
-                os.startfile(str(target_dir))
+                startfile = getattr(os, "startfile", None)
+                if startfile is None:
+                    return False
+                startfile(str(target_dir))
             return True
         except Exception:
             return False

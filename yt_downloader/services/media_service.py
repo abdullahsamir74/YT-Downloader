@@ -2,8 +2,8 @@
 Media service for high-level URL inspection, validation, and stream discovery.
 """
 
-import re
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple, Union
+
 from yt_downloader.core.models import MediaItem, PlaylistInfo
 from yt_downloader.infrastructure.ytdlp_engine import YtDlpEngine
 
@@ -25,7 +25,9 @@ class MediaService:
         """Strip surrounding spaces and basic shell characters."""
         return url.strip().strip("'\"<>")
 
-    def inspect_url(self, url: str) -> Tuple[str, Optional[Union[MediaItem, PlaylistInfo]]]:
+    def inspect_url(
+        self, url: str
+    ) -> Tuple[str, Optional[Union[MediaItem, PlaylistInfo]]]:
         """
         Inspect URL and return (type_str, entity).
         type_str is 'playlist', 'video', or 'unknown'.
